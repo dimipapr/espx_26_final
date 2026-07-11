@@ -2,6 +2,8 @@ CC := aarch64-linux-gnu-gcc
 
 CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -O2
 
+LDLIBS := -lwebsockets
+
 BUILD_DIR := build
 TARGET_NAME := rtes
 TARGET := $(BUILD_DIR)/$(TARGET_NAME)
@@ -18,7 +20,7 @@ PI_PATH := /home/jim/rtes
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(OBJ) -o $(TARGET)
+	$(CC) $(OBJ) -o $(TARGET) $(LDLIBS)
 
 $(BUILD_DIR)/main.o: $(SRC) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $(SRC) -o $(BUILD_DIR)/main.o
