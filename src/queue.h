@@ -6,7 +6,7 @@
 
 #include "message.h"
 
-#define QUEUE_CAPACITY 1024U
+#define QUEUE_CAPACITY 128U
 
 
 typedef struct{
@@ -33,5 +33,6 @@ int queue_pop(queue_t *queue, message_t *out_message);
 size_t queue_count(queue_t *queue);
 size_t queue_capacity(void);
 size_t queue_max_count(queue_t *queue);
+size_t queue_take_max_count(queue_t *queue);
 
 #endif

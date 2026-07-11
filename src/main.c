@@ -14,6 +14,7 @@
 #define JETSTREAM_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
 
 static volatile sig_atomic_t stop_requested = 0;
+static volatile sig_atomic_t consumer_finished = 0;
 
 static void handle_signal(int signal_number){
     (void) signal_number;
@@ -118,18 +119,18 @@ static void *consumer_thread(void *arg)
 
         nanosleep(&delay,NULL);
         
-        fprintf(
-            stderr,
-            "consumer: stored=%zu actual=%zu truncated=%d "
-            "queue=%zu max_queue=%zu\n",
-            message.stored_len,
-            message.actual_len,
-            message.truncated,
-            queue_count(queue),
-            queue_max_count(queue)
-        );
+        // fprintf(
+        //     stderr,
+        //     "consumer: stored=%zu actual=%zu truncated=%d "
+        //     "queue=%zu max_queue=%zu\n",
+        //     message.stored_len,
+        //     message.actual_len,
+        //     message.truncated,
+        //     queue_count(queue),
+        //     queue_max_count(queue)
+        // );
     }
-
+    consumer_finished = 1;
     return NULL;
 }
 
@@ -192,25 +193,18 @@ static int jetstream_callback(
             if (lws_is_final_fragment(wsi) &&
                     lws_remaining_packet_payload(wsi) == 0) {
                 int push_result;
-                push_result = queue_try_push(queue, &current_message);
-                if (push_result == 1) {
-                    size_t dropped_total;
 
+                push_result = queue_try_push(queue, &current_message);
+
+                if (push_result == 1) {
                     pthread_mutex_lock(&dropped_mutex);
                     dropped_messages++;
-                    dropped_total = dropped_messages;
                     pthread_mutex_unlock(&dropped_mutex);
-
-                    if (dropped_total == 1U || dropped_total % 100U == 0U) {
-                        fprintf(
-                            stderr,
-                            "Warning: total dropped messages=%zu\n",
-                            dropped_total
-                        );
-                    }
-                }else if (push_result != 0){
-                    fprintf(stderr, "Failed to queue message.\n");
+                } else if (push_result != 0) {
+                    stop_requested = 1;
+                    return -1;
                 }
+
                 memset(&current_message, 0, sizeof(current_message));
             }
 
@@ -233,6 +227,45 @@ static int jetstream_callback(
     return 0;
 }
 
+static void *monitor_thread(void *arg){
+
+    queue_t *queue = arg;
+    size_t total_dropped = 0U;
+
+    while (!consumer_finished){
+        struct timespec delay = {
+            .tv_nsec = 0,
+            .tv_sec = 1
+        };
+        size_t interval_dropped;
+        size_t interval_max_queue;
+
+        nanosleep(&delay, NULL);
+
+        pthread_mutex_lock(&dropped_mutex);
+        interval_dropped = dropped_messages;
+        dropped_messages = 0U;
+        pthread_mutex_unlock(&dropped_mutex);
+
+        interval_max_queue = queue_take_max_count(queue);
+        total_dropped += interval_dropped;
+
+        fprintf(
+            stderr,
+            "monitor: queue=%zu/%zu "
+            "max_queue=%zu "
+            "dropped=%zu "
+            "total_dropped=%zu\n",
+            queue_count(queue),
+            queue_capacity(),
+            interval_max_queue,
+            interval_dropped,
+            total_dropped
+        );
+    }
+    return NULL;
+}
+
 int main(void){
 
     signal(SIGINT, handle_signal);
@@ -240,6 +273,8 @@ int main(void){
     
     pthread_t producer;
     pthread_t consumer;
+    pthread_t monitor;
+
     if (queue_init(&message_queue) != 0){
         return 1;
     }
@@ -254,17 +289,47 @@ int main(void){
     }
 
     if (pthread_create(
-            &producer,
-            NULL,
-            producer_thread,
-            &message_queue) != 0) {
-        message_t sentinel;
-        fprintf(stderr, "Failed to create producer thread.\n");
+        &monitor,
+        NULL,
+        monitor_thread,
+        &message_queue) != 0) {
+    message_t sentinel;
+
+        fprintf(stderr, "Failed to create monitor thread.\n");
+
+        stop_requested = 1;
+
         memset(&sentinel, 0, sizeof(sentinel));
         queue_push(&message_queue, &sentinel);
 
         pthread_join(consumer, NULL);
+
         queue_destroy(&message_queue);
+        pthread_mutex_destroy(&dropped_mutex);
+
+        return 1;
+    }
+
+    if (pthread_create(
+        &producer,
+        NULL,
+        producer_thread,
+        &message_queue) != 0)
+    {
+        message_t sentinel;
+
+        fprintf(stderr, "Failed to create producer thread.\n");
+
+        stop_requested = 1;
+
+        memset(&sentinel, 0, sizeof(sentinel));
+        queue_push(&message_queue, &sentinel);
+
+        pthread_join(monitor, NULL);
+        pthread_join(consumer, NULL);
+
+        queue_destroy(&message_queue);
+        pthread_mutex_destroy(&dropped_mutex);
 
         return 1;
     }
@@ -277,10 +342,13 @@ int main(void){
 
     message_t sentinel;
     memset(&sentinel, 0, sizeof(sentinel));
+
     if (queue_push(&message_queue, &sentinel) != 0) {
         fprintf(stderr, "Failed to send consumer shutdown message.\n");
     }
+
     pthread_join(consumer, NULL);
+    pthread_join(monitor, NULL);
     queue_destroy(&message_queue);
     pthread_mutex_destroy(&dropped_mutex);
 

@@ -166,6 +166,24 @@ size_t queue_max_count(queue_t *queue)
     return max_count;
 }
 
+size_t queue_take_max_count(queue_t *queue)
+{
+    size_t max_count;
+
+    if (queue == NULL) {
+        return 0U;
+    }
+
+    pthread_mutex_lock(&queue->mutex);
+
+    max_count = queue->max_count;
+    queue->max_count = queue->count;
+
+    pthread_mutex_unlock(&queue->mutex);
+
+    return max_count;
+}
+
 size_t queue_capacity(void)
 {
     return QUEUE_CAPACITY;
