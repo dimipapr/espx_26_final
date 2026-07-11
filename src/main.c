@@ -3,6 +3,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "message.h"
@@ -103,13 +104,20 @@ static void *consumer_thread(void *arg)
     message_t message;
 
     while (1) {
-
+        
         if (queue_pop(queue, &message) != 0) {
             return NULL;
         }
         //empty shutdown sentinel message
         if (message.stored_len == 0U && message.actual_len == 0U)break;
 
+        struct timespec delay = {
+            .tv_sec = 0,
+            .tv_nsec = 50L* 1000L * 1000L
+        };
+
+        nanosleep(&delay,NULL);
+        
         fprintf(
             stderr,
             "consumer: stored=%zu actual=%zu truncated=%d "
@@ -185,10 +193,21 @@ static int jetstream_callback(
                     lws_remaining_packet_payload(wsi) == 0) {
                 int push_result;
                 push_result = queue_try_push(queue, &current_message);
-                if (push_result == 1){
+                if (push_result == 1) {
+                    size_t dropped_total;
+
                     pthread_mutex_lock(&dropped_mutex);
                     dropped_messages++;
+                    dropped_total = dropped_messages;
                     pthread_mutex_unlock(&dropped_mutex);
+
+                    if (dropped_total == 1U || dropped_total % 100U == 0U) {
+                        fprintf(
+                            stderr,
+                            "Warning: total dropped messages=%zu\n",
+                            dropped_total
+                        );
+                    }
                 }else if (push_result != 0){
                     fprintf(stderr, "Failed to queue message.\n");
                 }
@@ -197,6 +216,10 @@ static int jetstream_callback(
 
             break;
         }
+        case LWS_CALLBACK_CLIENT_CLOSED:
+            fprintf(stderr, "Jetstream connection closed.\n");
+            stop_requested = 1;
+            break;
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             lwsl_err(
                 "Connection error: %s\n",

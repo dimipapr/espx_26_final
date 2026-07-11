@@ -6,7 +6,7 @@
 
 #include "message.h"
 
-#define QUEUE_CAPACITY 64U
+#define QUEUE_CAPACITY 1024U
 
 
 typedef struct{
