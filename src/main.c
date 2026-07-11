@@ -1,7 +1,9 @@
 #include <libwebsockets.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "message.h"
 #include "queue.h"
@@ -9,6 +11,13 @@
 #define JETSTREAM_HOST "jetstream1.us-east.bsky.network"
 #define JETSTREAM_PORT 443
 #define JETSTREAM_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
+
+static volatile sig_atomic_t stop_requested = 0;
+
+static void handle_signal(int signal_number){
+    (void) signal_number;
+    stop_requested = 1;
+}
 
 static queue_t message_queue;
 
@@ -45,6 +54,7 @@ static void *producer_thread(void *arg){
 
     context = lws_create_context(&info);
     if (context == NULL){
+        stop_requested = 1;
         return NULL;
     }
     
@@ -62,14 +72,22 @@ static void *producer_thread(void *arg){
 
     if (lws_client_connect_via_info(&connection_info) == NULL) {
         lws_context_destroy(context);
+        stop_requested = 1;
         return NULL;
     }
 
-    while (1) {
-        if (lws_service(context, 0) < 0) {
+    while (!stop_requested){
+        if (lws_service(context, 100) < 0){
+            stop_requested = 1;
             break;
         }
     }
+
+    // while (1) {
+    //     if (lws_service(context, 0) < 0) {
+    //         break;
+    //     }
+    // }
 
     lws_context_destroy(context);
 
@@ -82,9 +100,12 @@ static void *consumer_thread(void *arg)
     message_t message;
 
     while (1) {
+
         if (queue_pop(queue, &message) != 0) {
             return NULL;
         }
+        //empty shutdown sentinel message
+        if (message.stored_len == 0U && message.actual_len == 0U)break;
 
         fprintf(
             stderr,
@@ -173,6 +194,7 @@ static int jetstream_callback(
                 "Connection error: %s\n",
                 in != NULL ? (const char *)in : "unknown error"
             );
+            stop_requested = 1;
             break;
         default:
             break;
@@ -182,6 +204,9 @@ static int jetstream_callback(
 
 int main(void){
 
+    signal(SIGINT, handle_signal);
+    signal(SIGTERM, handle_signal);
+    
     pthread_t producer;
     pthread_t consumer;
     if (queue_init(&message_queue) != 0){
@@ -202,13 +227,30 @@ int main(void){
             NULL,
             producer_thread,
             &message_queue) != 0) {
+        message_t sentinel;
         fprintf(stderr, "Failed to create producer thread.\n");
+            memset(&sentinel, 0, sizeof(sentinel));
+        queue_push(&message_queue, &sentinel);
+
+        pthread_join(consumer, NULL);
+        queue_destroy(&message_queue);
+
         return 1;
     }
 
-    
+    while(!stop_requested){
+        sleep(1);
+    }
+
     pthread_join(producer, NULL);
+
+    message_t sentinel;
+    memset(&sentinel, 0, sizeof(sentinel));
+    if (queue_push(&message_queue, &sentinel) != 0) {
+        fprintf(stderr, "Failed to send consumer shutdown message.\n");
+    }
     pthread_join(consumer, NULL);
+    queue_destroy(&message_queue);
 
     return 0;
 }

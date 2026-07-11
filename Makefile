@@ -39,7 +39,7 @@ upload: $(TARGET) clean-remote
 	scp $(TARGET) $(PI_USER)@$(PI_HOST):$(PI_PATH)/
 
 remote-run:
-	ssh $(PI_USER)@$(PI_HOST) "$(PI_PATH)/$(TARGET_NAME)"
+	ssh -t $(PI_USER)@$(PI_HOST) "$(PI_PATH)/rtes"
 
 deploy: upload remote-run
 
