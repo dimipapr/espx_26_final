@@ -222,6 +222,11 @@ static void *monitor_thread(void *arg)
 {
     queue_t *queue = arg;
 
+    char csv_filename[64];
+    time_t creation_time;
+    struct tm creation_tm;
+    FILE *csv_file;
+
     event_counters_t interval_counts;
 
     cpu_sample_t previous_cpu;
@@ -233,12 +238,45 @@ static void *monitor_thread(void *arg)
     struct timespec next_wakeup;
     struct timespec timestamp;
 
+    creation_time = time(NULL);
+
+    if (localtime_r(&creation_time, &creation_tm) == NULL) {
+        stop_requested = 1;
+        return NULL;
+    }
+
+    if (strftime(
+            csv_filename,
+            sizeof(csv_filename),
+            "metrics_%Y%m%d_%H%M%S.csv",
+            &creation_tm
+        ) == 0U) {
+        stop_requested = 1;
+        return NULL;
+    }
+
+    csv_file = fopen(csv_filename, "w");
+    if (csv_file == NULL) {
+        stop_requested = 1;
+        return NULL;
+    }
+
+    fprintf(
+        csv_file,
+        "Seconds,Nanoseconds,Commit_Count,Identity_Count,"
+        "Account_Count,Info_Count,Buffer_Occupancy_Pct,CPU_Pct\n"
+    );
+
+    fflush(csv_file);
+
     if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup) != 0) {
+        fclose(csv_file);
         stop_requested = 1;
         return NULL;
     }
 
     if (read_cpu_sample(&previous_cpu) != 0) {
+        fclose(csv_file);
         stop_requested = 1;
         return NULL;
     }
@@ -246,9 +284,14 @@ static void *monitor_thread(void *arg)
     while (!consumer_finished) {
         size_t interval_dropped;
         size_t interval_max_queue;
+        size_t current_queue_count;
+
         unsigned long long total_delta;
         unsigned long long idle_delta;
         unsigned long long busy_delta;
+
+        double buffer_occupancy_percent;
+
         int sleep_result;
 
         timespec_add_one_second(&next_wakeup);
@@ -310,34 +353,32 @@ static void *monitor_thread(void *arg)
 
         pthread_mutex_unlock(&dropped_mutex);
 
-        interval_max_queue =
-            queue_take_max_count(queue);
+        interval_max_queue = queue_take_max_count(queue);
+        current_queue_count = queue_count(queue);
+
+        buffer_occupancy_percent =
+            ((double)current_queue_count /
+             (double)queue_capacity()) * 100.0;
 
         total_dropped += interval_dropped;
 
         fprintf(
-            stderr,
-            "monitor: sec=%ld nsec=%ld "
-            "commit=%zu identity=%zu account=%zu "
-            "info=%zu unknown=%zu "
-            "queue=%zu/%zu max_queue=%zu "
-            "cpu=%.2f%% "
-            "dropped=%zu total_dropped=%zu\n",
+            csv_file,
+            "%ld,%ld,%zu,%zu,%zu,%zu,%.2f,%.2f\n",
             (long)timestamp.tv_sec,
             timestamp.tv_nsec,
             interval_counts.commit_count,
             interval_counts.identity_count,
             interval_counts.account_count,
             interval_counts.info_count,
-            interval_counts.unknown_count,
-            queue_count(queue),
-            queue_capacity(),
-            interval_max_queue,
-            cpu_percent,
-            interval_dropped,
-            total_dropped
+            buffer_occupancy_percent,
+            cpu_percent
         );
+
+        fflush(csv_file);
     }
+
+    fclose(csv_file);
 
     return NULL;
 }
