@@ -2,6 +2,8 @@
 #include <libwebsockets.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -22,8 +24,10 @@
 /* Shared state                                                               */
 /* -------------------------------------------------------------------------- */
 
-static volatile sig_atomic_t stop_requested = 0;
-static volatile sig_atomic_t consumer_finished = 0;
+static volatile sig_atomic_t signal_stop_requested = 0;
+
+static atomic_bool stop_requested = ATOMIC_VAR_INIT(false);
+static atomic_bool consumer_finished = ATOMIC_VAR_INIT(false);
 
 static queue_t message_queue;
 
@@ -90,7 +94,7 @@ static const struct lws_protocols protocols[] = {
 static void handle_signal(int signal_number)
 {
     (void)signal_number;
-    stop_requested = 1;
+    signal_stop_requested = 1;
 }
 
 
@@ -115,7 +119,7 @@ static void *producer_thread(void *arg)
 
     context = lws_create_context(&context_info);
     if (context == NULL) {
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
@@ -132,13 +136,13 @@ static void *producer_thread(void *arg)
 
     if (lws_client_connect_via_info(&connection_info) == NULL) {
         lws_context_destroy(context);
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
-    while (!stop_requested) {
+    while (!atomic_load(&stop_requested)) {
         if (lws_service(context, 100) < 0) {
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
         }
     }
@@ -162,7 +166,7 @@ static void *consumer_thread(void *arg)
 
     while (1) {
         if (queue_pop(queue, &message) != 0) {
-            consumer_finished = 1;
+            atomic_store(&consumer_finished, true);
             return NULL;
         }
 
@@ -204,7 +208,7 @@ static void *consumer_thread(void *arg)
         pthread_mutex_unlock(&event_counters_mutex);
     }
 
-    consumer_finished = 1;
+    atomic_store(&consumer_finished, true);
 
     return NULL;
 }
@@ -245,7 +249,7 @@ static void *monitor_thread(void *arg)
     creation_time = time(NULL);
 
     if (localtime_r(&creation_time, &creation_tm) == NULL) {
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
@@ -255,7 +259,7 @@ static void *monitor_thread(void *arg)
             "metrics_%Y%m%d_%H%M%S.csv",
             &creation_tm
         ) == 0U) {
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
@@ -265,20 +269,20 @@ static void *monitor_thread(void *arg)
             "diagnostics_%Y%m%d_%H%M%S.csv",
             &creation_tm
         ) == 0U) {
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
     metrics_file = fopen(metrics_filename, "w");
     if (metrics_file == NULL) {
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
     diagnostics_file = fopen(diagnostics_filename, "w");
     if (diagnostics_file == NULL) {
         fclose(metrics_file);
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
@@ -302,18 +306,18 @@ static void *monitor_thread(void *arg)
     if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup) != 0) {
         fclose(diagnostics_file);
         fclose(metrics_file);
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
     if (read_cpu_sample(&previous_cpu) != 0) {
         fclose(diagnostics_file);
         fclose(metrics_file);
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
         return NULL;
     }
 
-    while (!consumer_finished) {
+    while (!atomic_load(&consumer_finished)) {
         size_t interval_dropped;
         size_t interval_max_queue;
         size_t current_queue_count;
@@ -339,22 +343,22 @@ static void *monitor_thread(void *arg)
         } while (sleep_result == EINTR);
 
         if (sleep_result != 0) {
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
         }
 
         if (clock_gettime(CLOCK_MONOTONIC, &monotonic_timestamp) != 0) {
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
         }
 
         if (clock_gettime(CLOCK_REALTIME, &realtime_timestamp) != 0) {
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
         }
 
         if (read_cpu_sample(&current_cpu) != 0) {
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
         }
 
@@ -403,8 +407,8 @@ static void *monitor_thread(void *arg)
         fprintf(
             metrics_file,
             "%ld,%ld,%zu,%zu,%zu,%zu,%.2f,%.2f\n",
-            (long)monotonic_timestamp.tv_sec,
-            monotonic_timestamp.tv_nsec,
+            (long)realtime_timestamp.tv_sec,
+            realtime_timestamp.tv_nsec,
             interval_counts.commit_count,
             interval_counts.identity_count,
             interval_counts.account_count,
@@ -414,16 +418,17 @@ static void *monitor_thread(void *arg)
         );
 
         fprintf(
-            metrics_file,
-            "%ld,%ld,%zu,%zu,%zu,%zu,%.2f,%.2f\n",
+            diagnostics_file,
+            "%ld,%ld,%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
+            (long)monotonic_timestamp.tv_sec,
+            monotonic_timestamp.tv_nsec,
             (long)realtime_timestamp.tv_sec,
             realtime_timestamp.tv_nsec,
-            interval_counts.commit_count,
-            interval_counts.identity_count,
-            interval_counts.account_count,
-            interval_counts.info_count,
-            buffer_occupancy_percent,
-            cpu_percent
+            interval_counts.unknown_count,
+            interval_dropped,
+            total_dropped,
+            current_queue_count,
+            interval_max_queue
         );
 
         fflush(metrics_file);
@@ -506,7 +511,7 @@ static int jetstream_callback(
                     dropped_messages++;
                     pthread_mutex_unlock(&dropped_mutex);
                 } else if (push_result != 0) {
-                    stop_requested = 1;
+                    atomic_store(&stop_requested, true);
                     return -1;
                 }
 
@@ -522,7 +527,7 @@ static int jetstream_callback(
 
         case LWS_CALLBACK_CLIENT_CLOSED:
             fprintf(stderr, "Jetstream connection closed.\n");
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
 
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
@@ -533,7 +538,7 @@ static int jetstream_callback(
                     : "unknown error"
             );
 
-            stop_requested = 1;
+            atomic_store(&stop_requested, true);
             break;
 
         default:
@@ -636,7 +641,7 @@ int main(void)
 
         fprintf(stderr, "Failed to create monitor thread.\n");
 
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
 
         memset(&sentinel, 0, sizeof(sentinel));
         queue_push(&message_queue, &sentinel);
@@ -660,7 +665,7 @@ int main(void)
 
         fprintf(stderr, "Failed to create producer thread.\n");
 
-        stop_requested = 1;
+        atomic_store(&stop_requested, true);
 
         memset(&sentinel, 0, sizeof(sentinel));
         queue_push(&message_queue, &sentinel);
@@ -675,9 +680,12 @@ int main(void)
         return 1;
     }
 
-    while (!stop_requested) {
+    while (!atomic_load(&stop_requested) &&
+           !signal_stop_requested) {
         sleep(1);
     }
+
+    atomic_store(&stop_requested, true);
 
     pthread_join(producer, NULL);
 
