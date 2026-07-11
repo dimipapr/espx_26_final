@@ -222,10 +222,14 @@ static void *monitor_thread(void *arg)
 {
     queue_t *queue = arg;
 
-    char csv_filename[64];
+    char metrics_filename[64];
+    char diagnostics_filename[64];
+
     time_t creation_time;
     struct tm creation_tm;
-    FILE *csv_file;
+
+    FILE *metrics_file;
+    FILE *diagnostics_file;
 
     event_counters_t interval_counts;
 
@@ -233,7 +237,6 @@ static void *monitor_thread(void *arg)
     cpu_sample_t current_cpu;
 
     size_t total_dropped = 0U;
-    double cpu_percent = 0.0;
 
     struct timespec next_wakeup;
     struct timespec timestamp;
@@ -246,8 +249,8 @@ static void *monitor_thread(void *arg)
     }
 
     if (strftime(
-            csv_filename,
-            sizeof(csv_filename),
+            metrics_filename,
+            sizeof(metrics_filename),
             "metrics_%Y%m%d_%H%M%S.csv",
             &creation_tm
         ) == 0U) {
@@ -255,28 +258,54 @@ static void *monitor_thread(void *arg)
         return NULL;
     }
 
-    csv_file = fopen(csv_filename, "w");
-    if (csv_file == NULL) {
+    if (strftime(
+            diagnostics_filename,
+            sizeof(diagnostics_filename),
+            "diagnostics_%Y%m%d_%H%M%S.csv",
+            &creation_tm
+        ) == 0U) {
+        stop_requested = 1;
+        return NULL;
+    }
+
+    metrics_file = fopen(metrics_filename, "w");
+    if (metrics_file == NULL) {
+        stop_requested = 1;
+        return NULL;
+    }
+
+    diagnostics_file = fopen(diagnostics_filename, "w");
+    if (diagnostics_file == NULL) {
+        fclose(metrics_file);
         stop_requested = 1;
         return NULL;
     }
 
     fprintf(
-        csv_file,
+        metrics_file,
         "Seconds,Nanoseconds,Commit_Count,Identity_Count,"
         "Account_Count,Info_Count,Buffer_Occupancy_Pct,CPU_Pct\n"
     );
 
-    fflush(csv_file);
+    fprintf(
+        diagnostics_file,
+        "Seconds,Nanoseconds,Unknown_Count,Interval_Dropped,"
+        "Total_Dropped,Current_Queue,Max_Queue\n"
+    );
+
+    fflush(metrics_file);
+    fflush(diagnostics_file);
 
     if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup) != 0) {
-        fclose(csv_file);
+        fclose(diagnostics_file);
+        fclose(metrics_file);
         stop_requested = 1;
         return NULL;
     }
 
     if (read_cpu_sample(&previous_cpu) != 0) {
-        fclose(csv_file);
+        fclose(diagnostics_file);
+        fclose(metrics_file);
         stop_requested = 1;
         return NULL;
     }
@@ -290,6 +319,7 @@ static void *monitor_thread(void *arg)
         unsigned long long idle_delta;
         unsigned long long busy_delta;
 
+        double cpu_percent;
         double buffer_occupancy_percent;
 
         int sleep_result;
@@ -363,7 +393,7 @@ static void *monitor_thread(void *arg)
         total_dropped += interval_dropped;
 
         fprintf(
-            csv_file,
+            metrics_file,
             "%ld,%ld,%zu,%zu,%zu,%zu,%.2f,%.2f\n",
             (long)timestamp.tv_sec,
             timestamp.tv_nsec,
@@ -375,10 +405,24 @@ static void *monitor_thread(void *arg)
             cpu_percent
         );
 
-        fflush(csv_file);
+        fprintf(
+            diagnostics_file,
+            "%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
+            (long)timestamp.tv_sec,
+            timestamp.tv_nsec,
+            interval_counts.unknown_count,
+            interval_dropped,
+            total_dropped,
+            current_queue_count,
+            interval_max_queue
+        );
+
+        fflush(metrics_file);
+        fflush(diagnostics_file);
     }
 
-    fclose(csv_file);
+    fclose(diagnostics_file);
+    fclose(metrics_file);
 
     return NULL;
 }
