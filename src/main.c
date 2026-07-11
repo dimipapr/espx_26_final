@@ -243,6 +243,7 @@ static void *monitor_thread(void *arg)
     cpu_sample_t previous_cpu;
     cpu_sample_t current_cpu;
 
+    size_t total_unknown = 0U;
     size_t total_dropped = 0U;
     size_t total_truncated = 0U;
 
@@ -299,7 +300,8 @@ static void *monitor_thread(void *arg)
     fprintf(
         diagnostics_file,
         "Realtime_Seconds,Realtime_Nanoseconds,"
-        "Unknown_Count,Interval_Dropped,Total_Dropped,"
+        "Interval_Unknown,Total_Unknown,"
+        "Interval_Dropped,Total_Dropped,"
         "Interval_Truncated,Total_Truncated,"
         "Current_Queue,Max_Queue\n"
     );
@@ -414,6 +416,7 @@ static void *monitor_thread(void *arg)
             ((double)current_queue_count /
              (double)queue_capacity()) * 100.0;
 
+        total_unknown += interval_counts.unknown_count;
         total_dropped += interval_dropped;
         total_truncated += interval_truncated;
 
@@ -432,10 +435,11 @@ static void *monitor_thread(void *arg)
 
         fprintf(
             diagnostics_file,
-            "%ld,%ld,%zu,%zu,%zu,%zu,%zu,%zu,%zu\n",
+            "%ld,%ld,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu\n",
             (long)realtime_timestamp.tv_sec,
             realtime_timestamp.tv_nsec,
             interval_counts.unknown_count,
+            total_unknown,
             interval_dropped,
             total_dropped,
             interval_truncated,

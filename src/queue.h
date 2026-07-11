@@ -6,7 +6,7 @@
 
 #include "message.h"
 
-#define QUEUE_CAPACITY 128U
+#define QUEUE_CAPACITY 256U
 
 typedef struct {
     message_t buffer[QUEUE_CAPACITY];
