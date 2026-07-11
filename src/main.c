@@ -34,6 +34,9 @@ static queue_t message_queue;
 static size_t dropped_messages = 0U;
 static pthread_mutex_t dropped_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static size_t truncated_messages = 0U;
+static pthread_mutex_t truncated_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 typedef struct {
     size_t commit_count;
     size_t identity_count;
@@ -241,6 +244,7 @@ static void *monitor_thread(void *arg)
     cpu_sample_t current_cpu;
 
     size_t total_dropped = 0U;
+    size_t total_truncated = 0U;
 
     struct timespec next_wakeup;
     struct timespec monotonic_timestamp;
@@ -296,6 +300,7 @@ static void *monitor_thread(void *arg)
         diagnostics_file,
         "Realtime_Seconds,Realtime_Nanoseconds,"
         "Unknown_Count,Interval_Dropped,Total_Dropped,"
+        "Interval_Truncated,Total_Truncated,"
         "Current_Queue,Max_Queue\n"
     );
 
@@ -318,6 +323,7 @@ static void *monitor_thread(void *arg)
 
     while (!atomic_load(&consumer_finished)) {
         size_t interval_dropped;
+        size_t interval_truncated;
         size_t interval_max_queue;
         size_t current_queue_count;
 
@@ -394,6 +400,13 @@ static void *monitor_thread(void *arg)
 
         pthread_mutex_unlock(&dropped_mutex);
 
+        pthread_mutex_lock(&truncated_mutex);
+
+        interval_truncated = truncated_messages;
+        truncated_messages = 0U;
+
+        pthread_mutex_unlock(&truncated_mutex);
+
         interval_max_queue = queue_take_max_count(queue);
         current_queue_count = queue_count(queue);
 
@@ -402,6 +415,7 @@ static void *monitor_thread(void *arg)
              (double)queue_capacity()) * 100.0;
 
         total_dropped += interval_dropped;
+        total_truncated += interval_truncated;
 
         fprintf(
             metrics_file,
@@ -418,12 +432,14 @@ static void *monitor_thread(void *arg)
 
         fprintf(
             diagnostics_file,
-            "%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
+            "%ld,%ld,%zu,%zu,%zu,%zu,%zu,%zu,%zu\n",
             (long)realtime_timestamp.tv_sec,
             realtime_timestamp.tv_nsec,
             interval_counts.unknown_count,
             interval_dropped,
             total_dropped,
+            interval_truncated,
+            total_truncated,
             current_queue_count,
             interval_max_queue
         );
@@ -499,6 +515,12 @@ static int jetstream_callback(
             if (lws_is_final_fragment(wsi) &&
                 lws_remaining_packet_payload(wsi) == 0) {
                 int push_result;
+
+                if (current_message.truncated) {
+                    pthread_mutex_lock(&truncated_mutex);
+                    truncated_messages++;
+                    pthread_mutex_unlock(&truncated_mutex);
+                }
 
                 push_result =
                     queue_try_push(queue, &current_message);
@@ -647,6 +669,7 @@ int main(void)
 
         queue_destroy(&message_queue);
         pthread_mutex_destroy(&dropped_mutex);
+        pthread_mutex_destroy(&truncated_mutex);
         pthread_mutex_destroy(&event_counters_mutex);
 
         return 1;
@@ -672,6 +695,7 @@ int main(void)
 
         queue_destroy(&message_queue);
         pthread_mutex_destroy(&dropped_mutex);
+        pthread_mutex_destroy(&truncated_mutex);
         pthread_mutex_destroy(&event_counters_mutex);
 
         return 1;
@@ -704,6 +728,7 @@ int main(void)
 
     queue_destroy(&message_queue);
     pthread_mutex_destroy(&dropped_mutex);
+    pthread_mutex_destroy(&truncated_mutex);
     pthread_mutex_destroy(&event_counters_mutex);
 
     return 0;
