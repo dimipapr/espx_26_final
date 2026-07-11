@@ -414,17 +414,16 @@ static void *monitor_thread(void *arg)
         );
 
         fprintf(
-            diagnostics_file,
-            "%ld,%ld,%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
-            (long)monotonic_timestamp.tv_sec,
-            monotonic_timestamp.tv_nsec,
+            metrics_file,
+            "%ld,%ld,%zu,%zu,%zu,%zu,%.2f,%.2f\n",
             (long)realtime_timestamp.tv_sec,
             realtime_timestamp.tv_nsec,
-            interval_counts.unknown_count,
-            interval_dropped,
-            total_dropped,
-            current_queue_count,
-            interval_max_queue
+            interval_counts.commit_count,
+            interval_counts.identity_count,
+            interval_counts.account_count,
+            interval_counts.info_count,
+            buffer_occupancy_percent,
+            cpu_percent
         );
 
         fflush(metrics_file);
