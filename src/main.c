@@ -3,9 +3,13 @@
 #include <string.h>
 #include <stdio.h>
 
+#include "message.h"
+
 #define JETSTREAM_HOST "jetstream1.us-east.bsky.network"
 #define JETSTREAM_PORT 443
 #define JETSTREAM_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
+
+
 
 static int jetstream_callback(
     struct lws *wsi,
@@ -14,10 +18,18 @@ static int jetstream_callback(
     void *in,
     size_t len)
 {
+
+    // static size_t current_message_size = 0;
+    // static size_t max_message_size = 0;
+    // static size_t message_count = 0;
+    // static double average_message_size = 0.0;
+
+    static message_t current_message;
+
     // (void)wsi;
     (void)user;
-    (void)in;
-    (void)len;
+    // (void)in;
+    // (void)len;
 
     switch (reason)
     {
@@ -26,17 +38,45 @@ static int jetstream_callback(
             break;
 
         case LWS_CALLBACK_CLIENT_RECEIVE:
-            fwrite(in, 1, len, stdout);
+        {   
+            size_t available;
+            size_t bytes_to_copy;
+
+            current_message.actual_len += len;
+            available = MESSAGE_CAPACITY - current_message.stored_len;
+            bytes_to_copy = len<available? len: available;
+
+            if (bytes_to_copy > 0){
+                memcpy(
+                    current_message.data + current_message.stored_len,
+                    in,
+                    bytes_to_copy
+                );
+
+                current_message.stored_len += bytes_to_copy;
+            }
+
+            if (bytes_to_copy < len){
+                current_message.truncated = 1;
+            }
+
+            // fwrite(in, 1, len, stdout);
 
             if (lws_is_final_fragment(wsi) &&
-                lws_remaining_packet_payload(wsi) == 0) {
-                fputc('\n', stdout);
-                fputc('\n', stdout);
-                fflush(stdout);
+                    lws_remaining_packet_payload(wsi) == 0) {
+
+                fprintf(
+                    stderr,
+                    "stored=%zu actual=%zu truncated=%d\n",
+                    current_message.stored_len,
+                    current_message.actual_len,
+                    current_message.truncated
+                );
+                memset(&current_message, 0, sizeof(current_message));
             }
 
             break;
-        
+        }
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             lwsl_err(
                 "Connection error: %s\n",
