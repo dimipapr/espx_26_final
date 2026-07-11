@@ -38,6 +38,11 @@ typedef struct {
     size_t unknown_count;
 } event_counters_t;
 
+typedef struct {
+    unsigned long long idle;
+    unsigned long long total;
+} cpu_sample_t;
+
 static event_counters_t event_counters;
 static pthread_mutex_t event_counters_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -59,6 +64,8 @@ static int jetstream_callback(
     void *in,
     size_t len
 );
+
+static int read_cpu_sample(cpu_sample_t *sample);
 
 
 /* -------------------------------------------------------------------------- */
@@ -213,19 +220,35 @@ static void timespec_add_one_second(struct timespec *time){
 
 static void *monitor_thread(void *arg)
 {
-    event_counters_t interval_counts;
     queue_t *queue = arg;
+
+    event_counters_t interval_counts;
+
+    cpu_sample_t previous_cpu;
+    cpu_sample_t current_cpu;
+
     size_t total_dropped = 0U;
+    double cpu_percent = 0.0;
+
     struct timespec next_wakeup;
     struct timespec timestamp;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup)!=0){
+    if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup) != 0) {
         stop_requested = 1;
         return NULL;
     }
+
+    if (read_cpu_sample(&previous_cpu) != 0) {
+        stop_requested = 1;
+        return NULL;
+    }
+
     while (!consumer_finished) {
         size_t interval_dropped;
         size_t interval_max_queue;
+        unsigned long long total_delta;
+        unsigned long long idle_delta;
+        unsigned long long busy_delta;
         int sleep_result;
 
         timespec_add_one_second(&next_wakeup);
@@ -239,7 +262,7 @@ static void *monitor_thread(void *arg)
             );
         } while (sleep_result == EINTR);
 
-        if (sleep_result != 0){
+        if (sleep_result != 0) {
             stop_requested = 1;
             break;
         }
@@ -249,11 +272,36 @@ static void *monitor_thread(void *arg)
             break;
         }
 
+        if (read_cpu_sample(&current_cpu) != 0) {
+            stop_requested = 1;
+            break;
+        }
+
+        total_delta =
+            current_cpu.total - previous_cpu.total;
+
+        idle_delta =
+            current_cpu.idle - previous_cpu.idle;
+
+        busy_delta =
+            total_delta - idle_delta;
+
+        if (total_delta > 0U) {
+            cpu_percent =
+                ((double)busy_delta /
+                 (double)total_delta) * 100.0;
+        } else {
+            cpu_percent = 0.0;
+        }
+
+        previous_cpu = current_cpu;
+
         pthread_mutex_lock(&event_counters_mutex);
+
         interval_counts = event_counters;
         memset(&event_counters, 0, sizeof(event_counters));
-        pthread_mutex_unlock(&event_counters_mutex);
 
+        pthread_mutex_unlock(&event_counters_mutex);
 
         pthread_mutex_lock(&dropped_mutex);
 
@@ -262,14 +310,18 @@ static void *monitor_thread(void *arg)
 
         pthread_mutex_unlock(&dropped_mutex);
 
-        interval_max_queue = queue_take_max_count(queue);
+        interval_max_queue =
+            queue_take_max_count(queue);
+
         total_dropped += interval_dropped;
+
         fprintf(
             stderr,
             "monitor: sec=%ld nsec=%ld "
             "commit=%zu identity=%zu account=%zu "
             "info=%zu unknown=%zu "
             "queue=%zu/%zu max_queue=%zu "
+            "cpu=%.2f%% "
             "dropped=%zu total_dropped=%zu\n",
             (long)timestamp.tv_sec,
             timestamp.tv_nsec,
@@ -281,6 +333,7 @@ static void *monitor_thread(void *arg)
             queue_count(queue),
             queue_capacity(),
             interval_max_queue,
+            cpu_percent,
             interval_dropped,
             total_dropped
         );
@@ -392,6 +445,61 @@ static int jetstream_callback(
         default:
             break;
     }
+
+    return 0;
+}
+
+static int read_cpu_sample(cpu_sample_t *sample)
+{
+    FILE *file;
+
+    unsigned long long user;
+    unsigned long long nice;
+    unsigned long long system;
+    unsigned long long idle;
+    unsigned long long iowait;
+    unsigned long long irq;
+    unsigned long long softirq;
+    unsigned long long steal;
+
+    if (sample == NULL) {
+        return -1;
+    }
+
+    file = fopen("/proc/stat", "r");
+    if (file == NULL) {
+        return -1;
+    }
+
+    if (fscanf(
+            file,
+            "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+            &user,
+            &nice,
+            &system,
+            &idle,
+            &iowait,
+            &irq,
+            &softirq,
+            &steal
+        ) != 8) {
+        fclose(file);
+        return -1;
+    }
+
+    fclose(file);
+
+    sample->idle = idle + iowait;
+
+    sample->total =
+        user +
+        nice +
+        system +
+        idle +
+        iowait +
+        irq +
+        softirq +
+        steal;
 
     return 0;
 }
