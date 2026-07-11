@@ -14,7 +14,7 @@ static int jetstream_callback(
     void *in,
     size_t len)
 {
-    (void)wsi;
+    // (void)wsi;
     (void)user;
     (void)in;
     (void)len;
@@ -24,6 +24,19 @@ static int jetstream_callback(
         case LWS_CALLBACK_CLIENT_ESTABLISHED:
             fprintf(stderr, "Connected to Jetstream.\n");
             break;
+
+        case LWS_CALLBACK_CLIENT_RECEIVE:
+            fwrite(in, 1, len, stdout);
+
+            if (lws_is_final_fragment(wsi) &&
+                lws_remaining_packet_payload(wsi) == 0) {
+                fputc('\n', stdout);
+                fputc('\n', stdout);
+                fflush(stdout);
+            }
+
+            break;
+        
         case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
             lwsl_err(
                 "Connection error: %s\n",

@@ -31,7 +31,7 @@ $(BUILD_DIR):
 inspect: $(TARGET)
 	file $(TARGET)
 
-upload: $(TARGET)
+upload: $(TARGET) clean-remote
 	ssh $(PI_USER)@$(PI_HOST) "mkdir -p $(PI_PATH)"
 	scp $(TARGET) $(PI_USER)@$(PI_HOST):$(PI_PATH)/
 
