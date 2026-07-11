@@ -86,4 +86,4 @@ clean-remote:
 		 sudo systemctl daemon-reload; \
 		 rm -f $(PI_PATH)/$(TARGET_NAME)"
 
-clean: clean-local clean-remote
+clean: clean-local
