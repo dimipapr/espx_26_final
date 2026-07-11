@@ -1,6 +1,6 @@
 CC := aarch64-linux-gnu-gcc
 
-CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -O2 -pthread
+CFLAGS := -D_POSIX_C_SOURCE=200809L -std=c99 -Wall -Wextra -Wpedantic -O2 -pthread
 
 LDLIBS := -lwebsockets -pthread
 

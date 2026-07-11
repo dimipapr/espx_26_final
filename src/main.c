@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <libwebsockets.h>
 #include <pthread.h>
 #include <signal.h>
@@ -206,23 +207,38 @@ static void *consumer_thread(void *arg)
 /* Monitor thread                                                             */
 /* -------------------------------------------------------------------------- */
 
+static void timespec_add_one_second(struct timespec *time){
+    time->tv_sec += 1;
+}
+
 static void *monitor_thread(void *arg)
 {
     event_counters_t interval_counts;
-
     queue_t *queue = arg;
     size_t total_dropped = 0U;
+    struct timespec next_wakeup;
 
+    if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup)!=0){
+        stop_requested = 1;
+        return NULL;
+    }
     while (!consumer_finished) {
-        struct timespec delay = {
-            .tv_sec = 1,
-            .tv_nsec = 0
-        };
-
         size_t interval_dropped;
         size_t interval_max_queue;
+        int sleep_result;
 
-        nanosleep(&delay, NULL);
+        timespec_add_one_second(&next_wakeup);
+
+        do {
+            sleep_result = clock_nanosleep(
+                CLOCK_MONOTONIC,
+                TIMER_ABSTIME,
+                &next_wakeup,
+                NULL
+            );
+        } while (sleep_result == EINTR);
+
+        if (sleep_result != 0) break;
 
         pthread_mutex_lock(&event_counters_mutex);
         interval_counts = event_counters;
