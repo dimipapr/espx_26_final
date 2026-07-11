@@ -217,6 +217,7 @@ static void *monitor_thread(void *arg)
     queue_t *queue = arg;
     size_t total_dropped = 0U;
     struct timespec next_wakeup;
+    struct timespec timestamp;
 
     if (clock_gettime(CLOCK_MONOTONIC, &next_wakeup)!=0){
         stop_requested = 1;
@@ -238,7 +239,15 @@ static void *monitor_thread(void *arg)
             );
         } while (sleep_result == EINTR);
 
-        if (sleep_result != 0) break;
+        if (sleep_result != 0){
+            stop_requested = 1;
+            break;
+        }
+
+        if (clock_gettime(CLOCK_MONOTONIC, &timestamp) != 0) {
+            stop_requested = 1;
+            break;
+        }
 
         pthread_mutex_lock(&event_counters_mutex);
         interval_counts = event_counters;
@@ -257,10 +266,13 @@ static void *monitor_thread(void *arg)
         total_dropped += interval_dropped;
         fprintf(
             stderr,
-            "monitor: commit=%zu identity=%zu account=%zu "
+            "monitor: sec=%ld nsec=%ld "
+            "commit=%zu identity=%zu account=%zu "
             "info=%zu unknown=%zu "
             "queue=%zu/%zu max_queue=%zu "
             "dropped=%zu total_dropped=%zu\n",
+            (long)timestamp.tv_sec,
+            timestamp.tv_nsec,
             interval_counts.commit_count,
             interval_counts.identity_count,
             interval_counts.account_count,
