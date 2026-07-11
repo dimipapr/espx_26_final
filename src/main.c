@@ -294,7 +294,6 @@ static void *monitor_thread(void *arg)
 
     fprintf(
         diagnostics_file,
-        "Monotonic_Seconds,Monotonic_Nanoseconds,"
         "Realtime_Seconds,Realtime_Nanoseconds,"
         "Unknown_Count,Interval_Dropped,Total_Dropped,"
         "Current_Queue,Max_Queue\n"
@@ -419,9 +418,7 @@ static void *monitor_thread(void *arg)
 
         fprintf(
             diagnostics_file,
-            "%ld,%ld,%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
-            (long)monotonic_timestamp.tv_sec,
-            monotonic_timestamp.tv_nsec,
+            "%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
             (long)realtime_timestamp.tv_sec,
             realtime_timestamp.tv_nsec,
             interval_counts.unknown_count,
