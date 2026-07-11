@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+
 int queue_init(queue_t *queue)
 {
     int result;
@@ -33,36 +34,47 @@ int queue_init(queue_t *queue)
     return 0;
 }
 
-void queue_destroy( queue_t *queue){
-    if (queue == NULL)return;
+
+void queue_destroy(queue_t *queue)
+{
+    if (queue == NULL) {
+        return;
+    }
 
     pthread_cond_destroy(&queue->not_full);
     pthread_cond_destroy(&queue->not_empty);
     pthread_mutex_destroy(&queue->mutex);
 }
-/**
- * return values: 
- *      0   - message queued
- *      1   - queue full, message dropped
- *      -1  - internal error
+
+
+/*
+ * Return values:
+ *   0  - message queued
+ *   1  - queue full, message dropped
+ *  -1  - internal error
  */
-int queue_try_push(queue_t *queue, const message_t *message){
-    if (queue == NULL || message == NULL){
+int queue_try_push(
+    queue_t *queue,
+    const message_t *message
+)
+{
+    if (queue == NULL || message == NULL) {
         return -1;
     }
 
-    if (pthread_mutex_lock(&queue->mutex) != 0){
+    if (pthread_mutex_lock(&queue->mutex) != 0) {
         return -1;
     }
 
-    if (queue->count == QUEUE_CAPACITY){
+    if (queue->count == QUEUE_CAPACITY) {
         pthread_mutex_unlock(&queue->mutex);
         return 1;
     }
 
     queue->buffer[queue->tail] = *message;
-    queue->tail = (queue->tail +1U) % QUEUE_CAPACITY;
-    queue->count ++;
+    queue->tail = (queue->tail + 1U) % QUEUE_CAPACITY;
+    queue->count++;
+
     if (queue->count > queue->max_count) {
         queue->max_count = queue->count;
     }
@@ -73,15 +85,25 @@ int queue_try_push(queue_t *queue, const message_t *message){
     return 0;
 }
 
-int queue_push(queue_t *queue, const message_t *message)
+
+int queue_push(
+    queue_t *queue,
+    const message_t *message
+)
 {
-    if (queue == NULL || message == NULL)return -1;
-    if (pthread_mutex_lock(&queue->mutex) != 0)return -1;
+    if (queue == NULL || message == NULL) {
+        return -1;
+    }
+
+    if (pthread_mutex_lock(&queue->mutex) != 0) {
+        return -1;
+    }
 
     while (queue->count == QUEUE_CAPACITY) {
         if (pthread_cond_wait(
                 &queue->not_full,
-                &queue->mutex) != 0) {
+                &queue->mutex
+            ) != 0) {
             pthread_mutex_unlock(&queue->mutex);
             return -1;
         }
@@ -90,7 +112,8 @@ int queue_push(queue_t *queue, const message_t *message)
     queue->buffer[queue->tail] = *message;
     queue->tail = (queue->tail + 1U) % QUEUE_CAPACITY;
     queue->count++;
-    if (queue->count > queue->max_count){
+
+    if (queue->count > queue->max_count) {
         queue->max_count = queue->count;
     }
 
@@ -100,33 +123,40 @@ int queue_push(queue_t *queue, const message_t *message)
     return 0;
 }
 
-int queue_pop(queue_t *queue, message_t *out_message){
-    if (queue == NULL || out_message == NULL){
+
+int queue_pop(
+    queue_t *queue,
+    message_t *out_message
+)
+{
+    if (queue == NULL || out_message == NULL) {
         return -1;
     }
 
-    if (pthread_mutex_lock(&queue->mutex) != 0)return -1;
+    if (pthread_mutex_lock(&queue->mutex) != 0) {
+        return -1;
+    }
 
-    while (queue->count == 0U){
+    while (queue->count == 0U) {
         if (pthread_cond_wait(
-            &queue->not_empty,
-            &queue->mutex) != 0)
-        {
-                pthread_mutex_unlock(&queue->mutex);
-                return -1;
+                &queue->not_empty,
+                &queue->mutex
+            ) != 0) {
+            pthread_mutex_unlock(&queue->mutex);
+            return -1;
         }
     }
 
     *out_message = queue->buffer[queue->head];
     queue->head = (queue->head + 1U) % QUEUE_CAPACITY;
-    queue->count --;
+    queue->count--;
 
     pthread_cond_signal(&queue->not_full);
     pthread_mutex_unlock(&queue->mutex);
 
     return 0;
-        
 }
+
 
 size_t queue_count(queue_t *queue)
 {
@@ -147,6 +177,7 @@ size_t queue_count(queue_t *queue)
     return count;
 }
 
+
 size_t queue_max_count(queue_t *queue)
 {
     size_t max_count;
@@ -166,6 +197,7 @@ size_t queue_max_count(queue_t *queue)
     return max_count;
 }
 
+
 size_t queue_take_max_count(queue_t *queue)
 {
     size_t max_count;
@@ -183,6 +215,7 @@ size_t queue_take_max_count(queue_t *queue)
 
     return max_count;
 }
+
 
 size_t queue_capacity(void)
 {

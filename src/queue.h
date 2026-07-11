@@ -8,8 +8,7 @@
 
 #define QUEUE_CAPACITY 128U
 
-
-typedef struct{
+typedef struct {
     message_t buffer[QUEUE_CAPACITY];
 
     size_t head;
@@ -21,7 +20,6 @@ typedef struct{
     pthread_cond_t not_empty;
     pthread_cond_t not_full;
 } queue_t;
-
 
 int queue_init(queue_t *queue);
 void queue_destroy(queue_t *queue);
