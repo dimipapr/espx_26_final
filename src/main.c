@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "event_classifier.h"
 #include "message.h"
 #include "queue.h"
 
@@ -27,6 +28,16 @@ static queue_t message_queue;
 
 static size_t dropped_messages = 0U;
 static pthread_mutex_t dropped_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct {
+    size_t commit_count;
+    size_t identity_count;
+    size_t account_count;
+    size_t info_count;
+} event_counters_t;
+
+static event_counters_t event_counters;
+static pthread_mutex_t event_counters_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 /* -------------------------------------------------------------------------- */
@@ -137,9 +148,12 @@ static void *consumer_thread(void *arg)
 {
     queue_t *queue = arg;
     message_t message;
+    event_kind_t kind;
+
 
     while (1) {
         if (queue_pop(queue, &message) != 0) {
+            consumer_finished = 1;
             return NULL;
         }
 
@@ -148,6 +162,34 @@ static void *consumer_thread(void *arg)
             message.actual_len == 0U) {
             break;
         }
+
+        kind = classify_event(&message);
+
+        pthread_mutex_lock(&event_counters_mutex);
+
+        switch (kind) {
+            case EVENT_KIND_COMMIT:
+                event_counters.commit_count++;
+                break;
+
+            case EVENT_KIND_IDENTITY:
+                event_counters.identity_count++;
+                break;
+
+            case EVENT_KIND_ACCOUNT:
+                event_counters.account_count++;
+                break;
+
+            case EVENT_KIND_INFO:
+                event_counters.info_count++;
+                break;
+
+            case EVENT_KIND_UNKNOWN:
+            default:
+                break;
+        }
+
+        pthread_mutex_unlock(&event_counters_mutex);
     }
 
     consumer_finished = 1;
@@ -162,6 +204,8 @@ static void *consumer_thread(void *arg)
 
 static void *monitor_thread(void *arg)
 {
+    event_counters_t interval_counts;
+
     queue_t *queue = arg;
     size_t total_dropped = 0U;
 
@@ -176,6 +220,12 @@ static void *monitor_thread(void *arg)
 
         nanosleep(&delay, NULL);
 
+        pthread_mutex_lock(&event_counters_mutex);
+        interval_counts = event_counters;
+        memset(&event_counters, 0, sizeof(event_counters));
+        pthread_mutex_unlock(&event_counters_mutex);
+
+
         pthread_mutex_lock(&dropped_mutex);
 
         interval_dropped = dropped_messages;
@@ -185,13 +235,15 @@ static void *monitor_thread(void *arg)
 
         interval_max_queue = queue_take_max_count(queue);
         total_dropped += interval_dropped;
-
         fprintf(
             stderr,
-            "monitor: queue=%zu/%zu "
-            "max_queue=%zu "
-            "dropped=%zu "
-            "total_dropped=%zu\n",
+            "monitor: commit=%zu identity=%zu account=%zu info=%zu "
+            "queue=%zu/%zu max_queue=%zu "
+            "dropped=%zu total_dropped=%zu\n",
+            interval_counts.commit_count,
+            interval_counts.identity_count,
+            interval_counts.account_count,
+            interval_counts.info_count,
             queue_count(queue),
             queue_capacity(),
             interval_max_queue,
@@ -357,6 +409,7 @@ int main(void)
 
         queue_destroy(&message_queue);
         pthread_mutex_destroy(&dropped_mutex);
+        pthread_mutex_destroy(&event_counters_mutex);
 
         return 1;
     }
@@ -381,6 +434,7 @@ int main(void)
 
         queue_destroy(&message_queue);
         pthread_mutex_destroy(&dropped_mutex);
+        pthread_mutex_destroy(&event_counters_mutex);
 
         return 1;
     }
@@ -409,6 +463,7 @@ int main(void)
 
     queue_destroy(&message_queue);
     pthread_mutex_destroy(&dropped_mutex);
+    pthread_mutex_destroy(&event_counters_mutex);
 
     return 0;
 }

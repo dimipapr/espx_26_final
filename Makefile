@@ -8,8 +8,7 @@ BUILD_DIR := build
 TARGET_NAME := rtes
 TARGET := $(BUILD_DIR)/$(TARGET_NAME)
 
-SRC := src/main.c src/queue.c
-OBJ := $(BUILD_DIR)/main.o $(BUILD_DIR)/queue.o
+OBJ := $(BUILD_DIR)/main.o $(BUILD_DIR)/queue.o $(BUILD_DIR)/event_classifier.o 
 
 PI_USER := jim
 PI_HOST := 10.19.90.64
@@ -25,7 +24,10 @@ $(TARGET): $(OBJ)
 $(BUILD_DIR)/queue.o: src/queue.c src/queue.h src/message.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c src/queue.c -o $(BUILD_DIR)/queue.o
 
-$(BUILD_DIR)/main.o: src/main.c src/queue.h src/message.h | $(BUILD_DIR)
+$(BUILD_DIR)/event_classifier.o: src/event_classifier.c src/event_classifier.h src/jsmn.h src/message.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c src/event_classifier.c -o $(BUILD_DIR)/event_classifier.o
+
+$(BUILD_DIR)/main.o: src/main.c src/queue.h src/message.h src/event_classifier.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c src/main.c -o $(BUILD_DIR)/main.o
 
 $(BUILD_DIR):
