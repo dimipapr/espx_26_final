@@ -15,6 +15,7 @@ typedef struct{
     size_t head;
     size_t tail;
     size_t count;
+    size_t max_count;
 
     pthread_mutex_t mutex;
     pthread_cond_t not_empty;
@@ -30,5 +31,6 @@ int queue_pop(queue_t *queue, message_t *out_message);
 
 size_t queue_count(queue_t *queue);
 size_t queue_capacity(void);
+size_t queue_max_count(queue_t *queue);
 
 #endif

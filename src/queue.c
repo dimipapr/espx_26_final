@@ -58,6 +58,9 @@ int queue_push(queue_t *queue, const message_t *message)
     queue->buffer[queue->tail] = *message;
     queue->tail = (queue->tail + 1U) % QUEUE_CAPACITY;
     queue->count++;
+    if (queue->count > queue->max_count){
+        queue->max_count = queue->count;
+    }
 
     pthread_cond_signal(&queue->not_empty);
     pthread_mutex_unlock(&queue->mutex);
@@ -110,6 +113,25 @@ size_t queue_count(queue_t *queue)
     pthread_mutex_unlock(&queue->mutex);
 
     return count;
+}
+
+size_t queue_max_count(queue_t *queue)
+{
+    size_t max_count;
+
+    if (queue == NULL) {
+        return 0U;
+    }
+
+    if (pthread_mutex_lock(&queue->mutex) != 0) {
+        return 0U;
+    }
+
+    max_count = queue->max_count;
+
+    pthread_mutex_unlock(&queue->mutex);
+
+    return max_count;
 }
 
 size_t queue_capacity(void)

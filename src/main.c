@@ -1,15 +1,41 @@
 #include <libwebsockets.h>
-
-#include <string.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "message.h"
+#include "queue.h"
 
 #define JETSTREAM_HOST "jetstream1.us-east.bsky.network"
 #define JETSTREAM_PORT 443
 #define JETSTREAM_PATH "/subscribe?wantedCollections=app.bsky.feed.post"
 
+static queue_t message_queue;
 
+static void *consumer_thread(void *arg)
+{
+    queue_t *queue = arg;
+    message_t message;
+
+    while (1) {
+        if (queue_pop(queue, &message) != 0) {
+            return NULL;
+        }
+
+        fprintf(
+            stderr,
+            "consumer: stored=%zu actual=%zu truncated=%d "
+            "queue=%zu max_queue=%zu\n",
+            message.stored_len,
+            message.actual_len,
+            message.truncated,
+            queue_count(queue),
+            queue_max_count(queue)
+        );
+    }
+
+    return NULL;
+}
 
 static int jetstream_callback(
     struct lws *wsi,
@@ -65,13 +91,9 @@ static int jetstream_callback(
             if (lws_is_final_fragment(wsi) &&
                     lws_remaining_packet_payload(wsi) == 0) {
 
-                fprintf(
-                    stderr,
-                    "stored=%zu actual=%zu truncated=%d\n",
-                    current_message.stored_len,
-                    current_message.actual_len,
-                    current_message.truncated
-                );
+                if (queue_push(&message_queue, &current_message) != 0) {
+                    fprintf(stderr, "Failed to queue message.\n");
+                }
                 memset(&current_message, 0, sizeof(current_message));
             }
 
@@ -113,6 +135,20 @@ int main(void){
     info.protocols = protocols;
     info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
 
+    pthread_t consumer;
+    if (queue_init(&message_queue) != 0){
+        return 1;
+    }
+
+    if (pthread_create(
+        &consumer,
+        NULL,
+        consumer_thread,
+        &message_queue) != 0){
+            queue_destroy(&message_queue);
+            return 1;
+    }
+
     context = lws_create_context(&info);
     if (context == NULL)return 1;
 
@@ -132,8 +168,10 @@ int main(void){
         return 1;
     }
 
-    while (1){
-        lws_service(context, 0);
+    while (1) {
+        if (lws_service(context, 0) < 0) {
+            break;
+        }
     }
 
 
