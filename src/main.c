@@ -117,7 +117,7 @@ static void *consumer_thread(void *arg)
             .tv_nsec = 50L* 1000L * 1000L
         };
 
-        nanosleep(&delay,NULL);
+        // nanosleep(&delay,NULL);
         
         // fprintf(
         //     stderr,
