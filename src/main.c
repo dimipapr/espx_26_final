@@ -12,6 +12,70 @@
 
 static queue_t message_queue;
 
+static int jetstream_callback(
+    struct lws *wsi,
+    enum lws_callback_reasons reason,
+    void *user,
+    void *in,
+    size_t len);
+
+static const struct lws_protocols protocols[] = {
+    {
+        .name = "jetstream-client",
+        .callback = jetstream_callback,
+        .per_session_data_size = 0,
+        .rx_buffer_size = 0
+    },
+    {0}
+};
+
+static void *producer_thread(void *arg){
+    queue_t *queue = arg;
+
+    struct lws_context_creation_info info;
+    struct lws_client_connect_info connection_info;
+    struct lws_context *context;
+
+    memset(&info, 0, sizeof(info));
+    memset(&connection_info, 0, sizeof(connection_info));
+
+    info.port = CONTEXT_PORT_NO_LISTEN;
+    info.protocols = protocols;
+    info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
+
+    context = lws_create_context(&info);
+    if (context == NULL){
+        return NULL;
+    }
+    
+    connection_info.context = context;
+    connection_info.address = JETSTREAM_HOST;
+    connection_info.port = JETSTREAM_PORT;
+    connection_info.path = JETSTREAM_PATH;
+    connection_info.host = JETSTREAM_HOST;
+    connection_info.origin = JETSTREAM_HOST;
+    connection_info.ssl_connection = LCCSCF_USE_SSL;
+
+    connection_info.protocol = NULL;
+    connection_info.local_protocol_name = protocols[0].name;
+    connection_info.opaque_user_data = queue;
+
+    if (lws_client_connect_via_info(&connection_info) == NULL) {
+        lws_context_destroy(context);
+        return NULL;
+    }
+
+    while (1) {
+        if (lws_service(context, 0) < 0) {
+            break;
+        }
+    }
+
+    lws_context_destroy(context);
+
+    return NULL;
+}
+
 static void *consumer_thread(void *arg)
 {
     queue_t *queue = arg;
@@ -51,6 +115,7 @@ static int jetstream_callback(
     // static double average_message_size = 0.0;
 
     static message_t current_message;
+    queue_t *queue = lws_get_opaque_user_data(wsi);
 
     // (void)wsi;
     (void)user;
@@ -68,6 +133,10 @@ static int jetstream_callback(
             size_t available;
             size_t bytes_to_copy;
 
+            if (queue == NULL) {
+                fprintf(stderr, "Callback has no message queue.\n");
+                return -1;
+            }
             current_message.actual_len += len;
             available = MESSAGE_CAPACITY - current_message.stored_len;
             bytes_to_copy = len<available? len: available;
@@ -91,7 +160,7 @@ static int jetstream_callback(
             if (lws_is_final_fragment(wsi) &&
                     lws_remaining_packet_payload(wsi) == 0) {
 
-                if (queue_push(&message_queue, &current_message) != 0) {
+                if (queue_push(queue, &current_message) != 0) {
                     fprintf(stderr, "Failed to queue message.\n");
                 }
                 memset(&current_message, 0, sizeof(current_message));
@@ -111,30 +180,9 @@ static int jetstream_callback(
     return 0;
 }
 
-static const struct lws_protocols protocols[] = {
-    {
-        .name = "jetstream-client",
-        .callback = jetstream_callback,
-        .per_session_data_size = 0,
-        .rx_buffer_size = 0
-    },
-    {0}
-};
-
-
 int main(void){
 
-    struct lws_context_creation_info info;
-    struct lws_client_connect_info connection_info;
-    struct lws_context *context;
-
-    memset(&info, 0, sizeof(info));
-    memset(&connection_info, 0, sizeof(connection_info));
-
-    info.port = CONTEXT_PORT_NO_LISTEN;
-    info.protocols = protocols;
-    info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
-
+    pthread_t producer;
     pthread_t consumer;
     if (queue_init(&message_queue) != 0){
         return 1;
@@ -149,32 +197,18 @@ int main(void){
             return 1;
     }
 
-    context = lws_create_context(&info);
-    if (context == NULL)return 1;
-
-    connection_info.context = context;
-    connection_info.address = JETSTREAM_HOST;
-    connection_info.port = JETSTREAM_PORT;
-    connection_info.path = JETSTREAM_PATH;
-    connection_info.host = JETSTREAM_HOST;
-    connection_info.origin = JETSTREAM_HOST;
-    connection_info.ssl_connection = LCCSCF_USE_SSL;
-
-    connection_info.protocol = NULL;
-    connection_info.local_protocol_name = protocols[0].name;
-
-    if (lws_client_connect_via_info(&connection_info) == NULL){
-        lws_context_destroy(context);
+    if (pthread_create(
+            &producer,
+            NULL,
+            producer_thread,
+            &message_queue) != 0) {
+        fprintf(stderr, "Failed to create producer thread.\n");
         return 1;
     }
 
-    while (1) {
-        if (lws_service(context, 0) < 0) {
-            break;
-        }
-    }
+    
+    pthread_join(producer, NULL);
+    pthread_join(consumer, NULL);
 
-
-    lws_context_destroy(context);
     return 0;
 }
