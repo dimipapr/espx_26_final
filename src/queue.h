@@ -27,6 +27,7 @@ int queue_init(queue_t *queue);
 void queue_destroy(queue_t *queue);
 
 int queue_push(queue_t *queue, const message_t *message);
+int queue_try_push(queue_t *queue, const message_t *message);
 int queue_pop(queue_t *queue, message_t *out_message);
 
 size_t queue_count(queue_t *queue);

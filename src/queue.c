@@ -40,6 +40,38 @@ void queue_destroy( queue_t *queue){
     pthread_cond_destroy(&queue->not_empty);
     pthread_mutex_destroy(&queue->mutex);
 }
+/**
+ * return values: 
+ *      0   - message queued
+ *      1   - queue full, message dropped
+ *      -1  - internal error
+ */
+int queue_try_push(queue_t *queue, const message_t *message){
+    if (queue == NULL || message == NULL){
+        return -1;
+    }
+
+    if (pthread_mutex_lock(&queue->mutex) != 0){
+        return -1;
+    }
+
+    if (queue->count == QUEUE_CAPACITY){
+        pthread_mutex_unlock(&queue->mutex);
+        return 1;
+    }
+
+    queue->buffer[queue->tail] = *message;
+    queue->tail = (queue->tail +1U) % QUEUE_CAPACITY;
+    queue->count ++;
+    if (queue->count > queue->max_count) {
+        queue->max_count = queue->count;
+    }
+
+    pthread_cond_signal(&queue->not_empty);
+    pthread_mutex_unlock(&queue->mutex);
+
+    return 0;
+}
 
 int queue_push(queue_t *queue, const message_t *message)
 {

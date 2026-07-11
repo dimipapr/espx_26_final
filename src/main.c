@@ -38,6 +38,9 @@ static const struct lws_protocols protocols[] = {
     {0}
 };
 
+static size_t dropped_messages = 0U;
+static pthread_mutex_t dropped_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 static void *producer_thread(void *arg){
     queue_t *queue = arg;
 
@@ -180,8 +183,13 @@ static int jetstream_callback(
 
             if (lws_is_final_fragment(wsi) &&
                     lws_remaining_packet_payload(wsi) == 0) {
-
-                if (queue_push(queue, &current_message) != 0) {
+                int push_result;
+                push_result = queue_try_push(queue, &current_message);
+                if (push_result == 1){
+                    pthread_mutex_lock(&dropped_mutex);
+                    dropped_messages++;
+                    pthread_mutex_unlock(&dropped_mutex);
+                }else if (push_result != 0){
                     fprintf(stderr, "Failed to queue message.\n");
                 }
                 memset(&current_message, 0, sizeof(current_message));
@@ -229,7 +237,7 @@ int main(void){
             &message_queue) != 0) {
         message_t sentinel;
         fprintf(stderr, "Failed to create producer thread.\n");
-            memset(&sentinel, 0, sizeof(sentinel));
+        memset(&sentinel, 0, sizeof(sentinel));
         queue_push(&message_queue, &sentinel);
 
         pthread_join(consumer, NULL);
@@ -251,6 +259,7 @@ int main(void){
     }
     pthread_join(consumer, NULL);
     queue_destroy(&message_queue);
+    pthread_mutex_destroy(&dropped_mutex);
 
     return 0;
 }
