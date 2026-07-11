@@ -13,8 +13,11 @@ OBJ := $(BUILD_DIR)/main.o $(BUILD_DIR)/queue.o $(BUILD_DIR)/event_classifier.o
 PI_USER := jim
 PI_HOST := 10.19.90.64
 PI_PATH := /home/jim/rtes
+SERVICE_FILE := rtes.service
+SERVICE_NAME := rtes.service
 
-.PHONY: all clean clean-local clean-remote upload remote-run deploy inspect
+.PHONY: all clean clean-local clean-remote upload deploy inspect \
+	service-configure service-start service-stop service-status service-logs
 
 all: $(TARGET)
 
@@ -36,19 +39,51 @@ $(BUILD_DIR):
 inspect: $(TARGET)
 	file $(TARGET)
 
-upload: $(TARGET) clean-remote
+upload: $(TARGET)
 	ssh $(PI_USER)@$(PI_HOST) "mkdir -p $(PI_PATH)"
 	scp $(TARGET) $(PI_USER)@$(PI_HOST):$(PI_PATH)/
+	scp $(SERVICE_FILE) $(PI_USER)@$(PI_HOST):/tmp/$(SERVICE_FILE)
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo mv /tmp/$(SERVICE_FILE) /etc/systemd/system/$(SERVICE_FILE) && \
+		 sudo systemctl daemon-reload"
+
+service-configure: upload
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo systemctl enable --now $(SERVICE_NAME)"
+
+service-start:
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo systemctl start $(SERVICE_NAME)"
+
+service-stop:
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo systemctl stop $(SERVICE_NAME)"
+
+service-status:
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo systemctl status $(SERVICE_NAME)"
+
+service-logs:
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"journalctl -u $(SERVICE_NAME) -f"
+
+deploy: upload
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo systemctl restart $(SERVICE_NAME)"
 
 remote-run:
 	ssh -t $(PI_USER)@$(PI_HOST) "$(PI_PATH)/rtes"
 
-deploy: upload remote-run
+deploy: upload
 
 clean-local:
 	rm -rf $(BUILD_DIR)
 
 clean-remote:
-	ssh $(PI_USER)@$(PI_HOST) "rm -rf $(PI_PATH)"
+	ssh -t $(PI_USER)@$(PI_HOST) \
+		"sudo systemctl disable --now $(SERVICE_NAME) 2>/dev/null || true; \
+		 sudo rm -f /etc/systemd/system/$(SERVICE_FILE); \
+		 sudo systemctl daemon-reload; \
+		 rm -f $(PI_PATH)/$(TARGET_NAME)"
 
 clean: clean-local clean-remote

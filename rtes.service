@@ -1,0 +1,19 @@
+[Unit]
+Description=RTES Jetstream Monitor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=jim
+WorkingDirectory=/home/jim/rtes
+ExecStart=/home/jim/rtes/rtes
+
+Restart=always
+RestartSec=2
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

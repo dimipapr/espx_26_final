@@ -239,7 +239,8 @@ static void *monitor_thread(void *arg)
     size_t total_dropped = 0U;
 
     struct timespec next_wakeup;
-    struct timespec timestamp;
+    struct timespec monotonic_timestamp;
+    struct timespec realtime_timestamp;
 
     creation_time = time(NULL);
 
@@ -289,8 +290,10 @@ static void *monitor_thread(void *arg)
 
     fprintf(
         diagnostics_file,
-        "Seconds,Nanoseconds,Unknown_Count,Interval_Dropped,"
-        "Total_Dropped,Current_Queue,Max_Queue\n"
+        "Monotonic_Seconds,Monotonic_Nanoseconds,"
+        "Realtime_Seconds,Realtime_Nanoseconds,"
+        "Unknown_Count,Interval_Dropped,Total_Dropped,"
+        "Current_Queue,Max_Queue\n"
     );
 
     fflush(metrics_file);
@@ -340,7 +343,12 @@ static void *monitor_thread(void *arg)
             break;
         }
 
-        if (clock_gettime(CLOCK_MONOTONIC, &timestamp) != 0) {
+        if (clock_gettime(CLOCK_MONOTONIC, &monotonic_timestamp) != 0) {
+            stop_requested = 1;
+            break;
+        }
+
+        if (clock_gettime(CLOCK_REALTIME, &realtime_timestamp) != 0) {
             stop_requested = 1;
             break;
         }
@@ -395,8 +403,8 @@ static void *monitor_thread(void *arg)
         fprintf(
             metrics_file,
             "%ld,%ld,%zu,%zu,%zu,%zu,%.2f,%.2f\n",
-            (long)timestamp.tv_sec,
-            timestamp.tv_nsec,
+            (long)monotonic_timestamp.tv_sec,
+            monotonic_timestamp.tv_nsec,
             interval_counts.commit_count,
             interval_counts.identity_count,
             interval_counts.account_count,
@@ -407,9 +415,11 @@ static void *monitor_thread(void *arg)
 
         fprintf(
             diagnostics_file,
-            "%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
-            (long)timestamp.tv_sec,
-            timestamp.tv_nsec,
+            "%ld,%ld,%ld,%ld,%zu,%zu,%zu,%zu,%zu\n",
+            (long)monotonic_timestamp.tv_sec,
+            monotonic_timestamp.tv_nsec,
+            (long)realtime_timestamp.tv_sec,
+            realtime_timestamp.tv_nsec,
             interval_counts.unknown_count,
             interval_dropped,
             total_dropped,
