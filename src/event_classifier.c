@@ -60,44 +60,44 @@ event_kind_t classify_event( const message_t *message){
         return EVENT_KIND_UNKNOWN;
     }
 
-    for (index = 1; index + 1 < token_count; index++) {
-        if (!token_equals(message->data, &tokens[index], "kind")) {
-            continue;
+    index = 1;
+
+    while (index + 1 < token_count &&
+        tokens[index].start < tokens[0].end) {
+        const jsmntok_t *key = &tokens[index];
+        const jsmntok_t *value = &tokens[index + 1];
+        int value_end = value->end;
+
+        if (token_equals(message->data, key, "kind")) {
+            if (token_equals(message->data, value, "commit")) {
+                return EVENT_KIND_COMMIT;
+            }
+
+            if (token_equals(message->data, value, "identity")) {
+                return EVENT_KIND_IDENTITY;
+            }
+
+            if (token_equals(message->data, value, "account")) {
+                return EVENT_KIND_ACCOUNT;
+            }
+
+            if (token_equals(message->data, value, "info")) {
+                return EVENT_KIND_INFO;
+            }
+
+            return EVENT_KIND_UNKNOWN;
         }
 
-        if (token_equals(
-                message->data,
-                &tokens[index + 1],
-                "commit"
-            )) {
-            return EVENT_KIND_COMMIT;
-        }
+        /*
+        * Move past the value and all tokens nested inside it.
+        * The next token is then the next key in the root object.
+        */
+        index += 2;
 
-        if (token_equals(
-                message->data,
-                &tokens[index + 1],
-                "identity"
-            )) {
-            return EVENT_KIND_IDENTITY;
+        while (index < token_count &&
+            tokens[index].start < value_end) {
+            index++;
         }
-
-        if (token_equals(
-                message->data,
-                &tokens[index + 1],
-                "account"
-            )) {
-            return EVENT_KIND_ACCOUNT;
-        }
-
-        if (token_equals(
-                message->data,
-                &tokens[index + 1],
-                "info"
-            )) {
-            return EVENT_KIND_INFO;
-        }
-
-        return EVENT_KIND_UNKNOWN;
     }
     return EVENT_KIND_UNKNOWN;
 }

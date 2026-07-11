@@ -34,6 +34,7 @@ typedef struct {
     size_t identity_count;
     size_t account_count;
     size_t info_count;
+    size_t unknown_count;
 } event_counters_t;
 
 static event_counters_t event_counters;
@@ -185,7 +186,10 @@ static void *consumer_thread(void *arg)
                 break;
 
             case EVENT_KIND_UNKNOWN:
+                event_counters.unknown_count ++;
+                break;
             default:
+                event_counters.unknown_count ++;
                 break;
         }
 
@@ -237,13 +241,15 @@ static void *monitor_thread(void *arg)
         total_dropped += interval_dropped;
         fprintf(
             stderr,
-            "monitor: commit=%zu identity=%zu account=%zu info=%zu "
+            "monitor: commit=%zu identity=%zu account=%zu "
+            "info=%zu unknown=%zu "
             "queue=%zu/%zu max_queue=%zu "
             "dropped=%zu total_dropped=%zu\n",
             interval_counts.commit_count,
             interval_counts.identity_count,
             interval_counts.account_count,
             interval_counts.info_count,
+            interval_counts.unknown_count,
             queue_count(queue),
             queue_capacity(),
             interval_max_queue,
