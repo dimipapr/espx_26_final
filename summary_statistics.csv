@@ -1,0 +1,2 @@
+Samples,TotalMessages,MeanRateHz,MedianRateHz,MaxRateHz,MeanCpuPct,MaxCpuPct,MaxBufferPct,MeanIntervalS,MinIntervalS,MaxIntervalS,MaxAbsJitterMs,P99AbsJitterMs,RateCpuCorrelation,RateBufferCorrelation,UnknownMessages,DroppedMessages,TruncatedMessages,MaxCurrentQueue,MaxIntervalQueue
+86400,3743398,43.3263657407407,42,593,0.668414351851846,26.7,0.78,1.00000000012131,0.999825932,1.000179502,0.179502,0.0658062599999999,0.284596737407739,0.00748916182546582,739,0,58,2,4
