@@ -1,13 +1,15 @@
 # Πολυνηματικό Σύστημα Πραγματικού Χρόνου για Συλλογή Τηλεμετρίας από το Bluesky Jetstream
 
 **Ονοματεπώνυμο:** Δημήτρης Παπαδημητρίου  
-**Μάθημα:** Ενσωματωμένα Συστήματα Πραγματικού Χρόνου  
+**AEM:** 6995  
+**e-mail:** pcdimitr@auth.gr  
+**github:** https://github.com/dimipapr/espx_26_final.git  
+
 **Ημερομηνία συλλογής δεδομένων:** 12–13 Ιουλίου 2026  
 **Υλικό εκτέλεσης:** Raspberry Pi 4 Model B Rev 1.4, 4 GB RAM  
 **Λειτουργικό σύστημα:** Debian GNU/Linux 13 (Trixie)  
 **Πυρήνας Linux:** 6.18.34+rpt-rpi-v8, PREEMPT  
 **Αρχιτεκτονική:** AArch64  
-**Αποθετήριο κώδικα:** https://github.com/dimipapr/espx_26_final.git  
 
 ## 1. Σκοπός της εργασίας
 
