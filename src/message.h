@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#define MESSAGE_CAPACITY (32U * 1024U)
+#define MESSAGE_CAPACITY (64U * 1024U)
 
 typedef struct {
     char data[MESSAGE_CAPACITY];
